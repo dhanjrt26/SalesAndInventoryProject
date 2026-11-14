@@ -1,0 +1,275 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#f5f7f3">
+    <title>Sari-Sari Store | Sales & Inventory</title>
+    <link rel="stylesheet" href="/app.css?v=global-progress-20261112">
+</head>
+<body>
+<div id="global-progress" class="global-progress" role="progressbar" aria-label="Loading data"
+     aria-valuetext="Loading" aria-hidden="true"><span></span></div>
+<main id="login-view" class="login-layout">
+    <section class="login-card">
+        <div class="brand-mark">SS</div>
+        <p class="eyebrow">STORE MANAGEMENT</p>
+        <h1>Welcome back</h1>
+        <p class="muted">Sign in to your Sari-Sari Store workspace.</p>
+        <form id="login-form" class="stack">
+            <label>Username
+                <input id="username" type="text" autocomplete="username" required>
+            </label>
+            <label>Password
+                <input id="password" type="password" autocomplete="current-password" required>
+            </label>
+            <button class="button primary wide" type="submit">Sign in</button>
+            <p id="login-message" class="form-message" role="status"></p>
+        </form>
+    </section>
+</main>
+
+<div id="app-view" class="app-shell hidden">
+    <aside class="sidebar">
+        <a class="brand" href="#" aria-label="Sari-Sari Store home">
+            <span class="brand-mark small-mark">SS</span>
+            <span><strong>Sari-Sari</strong><small>STORE SYSTEM</small></span>
+        </a>
+        <nav class="navigation" aria-label="Main navigation">
+            <button class="nav-link active" data-page="dashboard"><span>▦</span> Dashboard</button>
+            <button class="nav-link" data-page="pos"><span>▣</span> Point of sale</button>
+            <button class="nav-link" data-page="inventory"><span>▤</span> Inventory</button>
+        </nav>
+        <div class="sidebar-footer">
+            <span class="online-dot"></span>
+            <span id="connection-label">Connected</span>
+        </div>
+    </aside>
+
+    <section class="workspace">
+        <header class="topbar">
+            <div>
+                <p class="eyebrow">SARI-SARI STORE</p>
+                <h2 id="page-title">Dashboard</h2>
+            </div>
+            <div class="account">
+                <div class="avatar" id="user-avatar">S</div>
+                <div class="account-copy">
+                    <strong id="user-email">Signed in</strong>
+                    <small id="user-roles"></small>
+                </div>
+                <button id="sign-out" class="button ghost">Sign out</button>
+            </div>
+        </header>
+
+        <div id="app-message" class="app-message hidden" role="status"></div>
+
+        <section id="dashboard-page" class="page-section">
+            <div class="page-intro">
+                <div>
+                    <h1>Store overview</h1>
+                    <p class="muted">A snapshot of sales and inventory performance.</p>
+                </div>
+                <button id="refresh-dashboard" class="button secondary">Refresh data</button>
+            </div>
+            <div class="stats-grid">
+                <article class="stat-card"><span>Today's sales</span><strong id="stat-today">—</strong><small>Since midnight</small></article>
+                <article class="stat-card"><span>This week</span><strong id="stat-week">—</strong><small>Sales total</small></article>
+                <article class="stat-card"><span>This month</span><strong id="stat-month">—</strong><small>Sales total</small></article>
+                <article class="stat-card"><span>Inventory value</span><strong id="stat-inventory">—</strong><small>At cost price</small></article>
+                <article class="stat-card dashboard-profit-card hidden"><span>Gross profit today</span><strong id="profit-today">—</strong><small>Since midnight</small></article>
+                <article class="stat-card dashboard-profit-card hidden"><span>Gross profit this week</span><strong id="profit-week">—</strong><small>Week to date</small></article>
+                <article class="stat-card dashboard-profit-card hidden"><span>Gross profit this month</span><strong id="profit-month">—</strong><small>Month to date</small></article>
+                <button id="sales-dashboard-card" class="stat-card sales-card hidden" type="button">
+                    <span>Sales</span><strong id="stat-sales-count">—</strong><small>View sales history</small>
+                </button>
+            </div>
+            <div class="content-card">
+                <div class="section-heading">
+                    <div><h3>Stock alerts</h3><p class="muted">Products at or below their minimum stock level.</p></div>
+                    <span id="alert-count" class="count-pill">0 items</span>
+                </div>
+                <div class="table-wrap">
+                    <table>
+                        <thead><tr><th>Product</th><th>SKU</th><th>Barcode</th><th>In stock</th><th>Minimum</th><th>Status</th></tr></thead>
+                        <tbody id="alerts-table"></tbody>
+                    </table>
+                    <p id="alerts-empty" class="empty-state hidden">Everything is stocked above its minimum level.</p>
+                </div>
+            </div>
+        </section>
+
+        <section id="sales-page" class="page-section hidden">
+            <div class="page-intro">
+                <div><h1>Sales</h1><p class="muted">Browse completed sales and the items purchased by each customer.</p></div>
+            </div>
+            <div class="content-card">
+                <div class="search-row sales-filters">
+                    <label>Filter by
+                        <select id="sales-filter-type">
+                            <option value="all">All sales</option>
+                            <option value="date">Date</option>
+                            <option value="month">Month</option>
+                            <option value="year">Year</option>
+                        </select>
+                    </label>
+                    <label id="sales-filter-value-field" class="hidden">Value
+                        <input id="sales-filter-value" type="date">
+                    </label>
+                    <button id="apply-sales-filter" class="button primary" type="button">Apply filter</button>
+                    <button id="clear-sales-filter" class="button secondary" type="button">Clear</button>
+                </div>
+                <div class="stats-grid sales-summary">
+                    <article class="stat-card"><span>Sales count</span><strong id="sales-summary-count">0</strong><small>Completed sales</small></article>
+                    <article class="stat-card"><span>Sales total</span><strong id="sales-summary-total">₱0.00</strong><small>For selected period</small></article>
+                    <article class="stat-card"><span>Average sale</span><strong id="sales-summary-average">₱0.00</strong><small>Per completed sale</small></article>
+                    <article class="stat-card profit-stat"><span>Gross profit</span><strong id="sales-summary-profit">₱0.00</strong><small>Sales minus item cost</small></article>
+                </div>
+                <div class="table-wrap">
+                    <table>
+                        <thead><tr><th>Date</th><th>Receipt</th><th>Customer</th><th>Items</th><th>Total</th></tr></thead>
+                        <tbody id="sales-table"></tbody>
+                    </table>
+                    <p id="sales-empty" class="empty-state hidden">No sales found for this period.</p>
+                </div>
+                <div class="sales-pagination">
+                    <p id="sales-page-status" class="muted">No sales</p>
+                    <div class="button-row">
+                        <button id="sales-previous" class="button secondary" type="button">Previous</button>
+                        <button id="sales-next" class="button secondary" type="button">Next</button>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <section id="pos-page" class="page-section hidden">
+            <div class="page-intro pos-page-intro">
+                <div>
+                    <p class="eyebrow">CHECKOUT</p>
+                    <h1>Point of sale</h1>
+                    <p class="muted">Scan a barcode or search for products to start a sale.</p>
+                </div>
+                <div class="pos-ready"><span class="online-dot"></span>Ready to sell</div>
+            </div>
+            <div class="pos-layout">
+                <section class="content-card cart-card pos-cart-panel">
+                    <div class="pos-panel-heading pos-cart-heading">
+                        <span class="pos-panel-icon cart-panel-icon" aria-hidden="true">01</span>
+                        <div><p class="eyebrow">CURRENT SALE</p><h2>Cart</h2></div>
+                        <span id="cart-count" class="pos-cart-count">0 items</span>
+                        <button id="clear-cart" class="button ghost" type="button">Clear</button>
+                    </div>
+                    <div id="cart-items" class="cart-items" aria-live="polite"></div>
+                    <div id="cart-empty" class="empty-state pos-cart-empty">
+                        <span class="pos-empty-icon" aria-hidden="true">+</span>
+                        <strong>Your cart is empty</strong>
+                        <span>Search for a product and add it to this sale.</span>
+                    </div>
+                    <div class="cart-total"><span>Total</span><strong id="cart-total">₱0.00</strong></div>
+                    <div class="pos-checkout-options">
+                        <label id="pos-customer-field">Customer
+                            <select id="pos-customer"><option value="">Walk-in customer</option></select>
+                        </label>
+                        <label>Payment method
+                            <select id="payment-method"><option value="CASH">Cash</option><option value="CARD">Card</option><option value="EWALLET">E-wallet</option></select>
+                        </label>
+                    </div>
+                    <label id="cash-field">Cash received
+                        <input id="cash-tendered" type="number" min="0" step="0.01" placeholder="0.00" inputmode="decimal">
+                    </label>
+                    <button id="checkout" class="button primary wide pos-checkout-button" disabled>Complete sale</button>
+                </section>
+                <section class="content-card pos-catalog-panel">
+                    <div class="pos-panel-heading">
+                        <span class="pos-panel-icon" aria-hidden="true">02</span>
+                        <div><p class="eyebrow">PRODUCT CATALOG</p><h2>Find products</h2></div>
+                    </div>
+                    <div class="search-row pos-search-row">
+                        <label class="grow">Barcode or product search
+                            <input id="product-query" type="search" placeholder="Enter barcode, SKU, or product name">
+                        </label>
+                        <button id="search-products" class="button primary">Search products</button>
+                    </div>
+                    <p class="small muted pos-helper">A USB barcode scanner that types into the search field is supported.</p>
+                    <div id="product-results" class="product-results" aria-label="Product search results"></div>
+                    <p id="product-results-empty" class="empty-state">Search for a product to get started.</p>
+                </section>
+            </div>
+        </section>
+
+        <section id="inventory-page" class="page-section hidden">
+            <div class="page-intro">
+                <div><h1>Inventory</h1><p class="muted">Search products, add items, and record stock adjustments.</p></div>
+                <button id="new-product-toggle" class="button primary">+ Add product</button>
+            </div>
+            <form id="new-product-form" class="content-card product-form hidden">
+                <div class="section-heading"><div><h3>New product</h3><p class="muted">Required fields are marked with an asterisk.</p></div></div>
+                <div class="form-grid">
+                    <label>Product name *<input name="name" maxlength="180" required></label>
+                    <label>SKU *<input name="sku" maxlength="64" required></label>
+                    <label>Barcode<input name="barcode" maxlength="64"></label>
+                    <label>Cost price *<input name="costPrice" type="number" min="0" step="0.01" required></label>
+                    <label>Selling price *<input name="sellingPrice" type="number" min="0" step="0.01" required></label>
+                    <label>Opening stock<input name="stockQty" type="number" min="0" step="1" value="0"></label>
+                    <label>Minimum stock<input name="minStock" type="number" min="0" step="1" value="0"></label>
+                </div>
+                <div class="button-row"><button type="submit" class="button primary">Save product</button><button type="button" id="cancel-product" class="button secondary">Cancel</button></div>
+            </form>
+            <div class="content-card">
+                <div class="search-row">
+                    <label class="grow">Find products<input id="inventory-query" type="search" placeholder="Search by name, SKU, or barcode"></label>
+                    <button id="search-inventory" class="button secondary">Search</button>
+                </div>
+                <div class="table-wrap">
+                    <table>
+                        <thead><tr><th>Product</th><th>SKU / barcode</th><th>Cost</th><th>Price</th><th>Stock</th><th>Status</th><th></th></tr></thead>
+                        <tbody id="inventory-table"></tbody>
+                    </table>
+                    <p id="inventory-empty" class="empty-state hidden">No products found.</p>
+                </div>
+            </div>
+        </section>
+    </section>
+</div>
+
+<dialog id="receipt-dialog" class="receipt-dialog">
+    <article id="receipt-content" class="receipt-paper"></article>
+    <div class="button-row no-print"><button id="print-receipt" class="button primary">Print receipt</button><button id="close-receipt" class="button secondary">Close</button></div>
+</dialog>
+<dialog id="adjust-stock-dialog" class="form-dialog" aria-labelledby="adjust-stock-title">
+    <form id="adjust-stock-form" class="stock-adjustment-form">
+        <div class="section-heading stock-dialog-heading">
+            <div>
+                <p class="eyebrow">INVENTORY</p>
+                <h2 id="adjust-stock-title">Adjust stock</h2>
+                <p class="muted">Review the selected product and enter the stock change.</p>
+            </div>
+        </div>
+        <div class="stock-product-summary">
+            <div><span>Product</span><strong id="adjust-stock-product-name">—</strong></div>
+            <div><span>SKU</span><strong id="adjust-stock-product-sku">—</strong></div>
+            <div><span>Current stock</span><strong id="adjust-stock-current">—</strong></div>
+        </div>
+        <label>Quantity change
+            <input id="adjust-stock-quantity" name="quantityChange" type="number" step="1" required
+                   placeholder="For example, 10 or -3" aria-describedby="adjust-stock-preview-note">
+        </label>
+        <div class="stock-preview" aria-live="polite">
+            <span>Stock after adjustment</span>
+            <strong id="adjust-stock-next">—</strong>
+            <small id="adjust-stock-preview-note">Enter a positive number to add stock or a negative number to remove it.</small>
+        </div>
+        <label>Reason
+            <textarea id="adjust-stock-reason" name="reason" maxlength="500" required
+                      placeholder="Why is the stock changing?"></textarea>
+        </label>
+        <p id="adjust-stock-error" class="dialog-error hidden" role="alert"></p>
+        <div class="button-row stock-dialog-actions">
+            <button id="cancel-stock-adjustment" class="button secondary" type="button">Cancel</button>
+            <button id="save-stock-adjustment" class="button primary" type="submit">Save adjustment</button>
+        </div>
+    </form>
+</dialog>
+<script src="/app.js?v=stock-adjustment-modal-20261112" defer></script>
+</body>
+</html>

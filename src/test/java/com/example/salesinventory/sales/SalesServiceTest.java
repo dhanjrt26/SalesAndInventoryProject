@@ -1,14 +1,17 @@
 package com.example.salesinventory.sales;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
 import java.math.BigDecimal;
 import java.sql.Timestamp;
 import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -64,6 +67,57 @@ class SalesServiceTest {
         assertThat(result.salesTotal()).isEqualByComparingTo("135.00");
         assertThat(result.averageSale()).isEqualByComparingTo("135.00");
         assertThat(result.grossProfit()).isEqualByComparingTo("45.00");
+    }
+
+    @Test
+    void returnsProductSalesAndCurrentStockMetricsForSelectedPeriod() {
+        Instant from = Instant.parse("2026-11-01T00:00:00Z");
+        Instant to = Instant.parse("2026-12-01T00:00:00Z");
+        Map<String, Object> summary = Map.of(
+                "product_count", 3L,
+                "units_sold", 12L,
+                "revenue", new BigDecimal("240.00"),
+                "gross_profit", new BigDecimal("60.00"),
+                "inventory_value", new BigDecimal("500.00"),
+                "low_stock_count", 1L,
+                "out_of_stock_count", 1L);
+        Map<String, Object> product = Map.ofEntries(
+                Map.entry("productId", UUID.randomUUID()),
+                Map.entry("productName", "Rice"),
+                Map.entry("sku", "RICE-01"),
+                Map.entry("categoryName", "Grains"),
+                Map.entry("stockQty", 8),
+                Map.entry("minStock", 2),
+                Map.entry("status", "ACTIVE"),
+                Map.entry("unitsSold", 12L),
+                Map.entry("revenue", new BigDecimal("240.00")),
+                Map.entry("grossProfit", new BigDecimal("60.00")),
+                Map.entry("stockStatus", "IN_STOCK"));
+        JdbcTemplate jdbc = mock(JdbcTemplate.class);
+        when(jdbc.queryForMap(anyString(), any(Object[].class))).thenReturn(summary);
+        when(jdbc.queryForObject(anyString(), org.mockito.ArgumentMatchers.eq(Long.class))).thenReturn(3L);
+        when(jdbc.queryForList(anyString(), any(Object[].class))).thenReturn(List.of(product));
+
+        SalesService service = new SalesService(jdbc, mock(ActorContext.class));
+
+        SalesService.ProductReport result = service.productReport(from, to, 50, 0);
+
+        assertThat(result.totalCount()).isEqualTo(3);
+        assertThat(result.summary()).containsEntry("units_sold", 12L)
+                .containsEntry("gross_profit", new BigDecimal("60.00"));
+        assertThat(result.products()).containsExactly(product);
+    }
+
+    @Test
+    void rejectsProductReportWithInvalidDateRange() {
+        JdbcTemplate jdbc = mock(JdbcTemplate.class);
+        SalesService service = new SalesService(jdbc, mock(ActorContext.class));
+        Instant from = Instant.parse("2026-12-01T00:00:00Z");
+
+        assertThatThrownBy(() -> service.productReport(from, from.minus(1, ChronoUnit.DAYS), 50, 0))
+                .isInstanceOf(com.example.salesinventory.api.ApiException.class)
+                .hasMessage("'from' must be earlier than 'to'.");
+        org.mockito.Mockito.verify(jdbc, never()).queryForMap(anyString(), any(Object[].class));
     }
 
     private static Map<String, Object> saleRow(

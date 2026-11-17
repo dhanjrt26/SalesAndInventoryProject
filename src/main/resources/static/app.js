@@ -6,6 +6,11 @@
         user: null,
         products: [],
         adjustingProduct: null,
+        pricingProduct: null,
+        historyProduct: null,
+        historyOffset: 0,
+        historyPageSize: 50,
+        historyRequest: 0,
         posCatalogProducts: [],
         posCatalogLoaded: false,
         posSearchTimer: null,
@@ -13,6 +18,8 @@
         customersLoaded: false,
         salesOffset: 0,
         salesPageSize: 50,
+        productReportOffset: 0,
+        productReportPageSize: 50,
         cart: new Map(),
         page: "dashboard"
     };
@@ -22,6 +29,8 @@
     const loginMessage = $("#login-message");
     const appMessage = $("#app-message");
     const globalProgress = $("#global-progress");
+    const posCatalogMedia = window.matchMedia("(max-width: 760px)");
+    const posVisualViewport = window.visualViewport;
     const currency = new Intl.NumberFormat("en-PH", { style: "currency", currency: "PHP" });
     let activeFetches = 0;
     let progressHideTimer = null;
@@ -82,6 +91,25 @@
         appMessage.textContent = message;
         appMessage.classList.remove("hidden", "error");
         window.setTimeout(() => appMessage.classList.add("hidden"), 4000);
+    }
+
+    function syncPosCatalogLayout() {
+        const dialog = $("#pos-catalog-dialog");
+        const catalog = $("#pos-catalog-panel");
+        if (posCatalogMedia.matches) {
+            dialog.append(catalog);
+            updatePosCatalogViewport();
+            return;
+        }
+        if (dialog.open) dialog.close();
+        $("#pos-catalog-slot").append(catalog);
+    }
+
+    function updatePosCatalogViewport() {
+        if (!posCatalogMedia.matches || !posVisualViewport) return;
+        const dialog = $("#pos-catalog-dialog");
+        dialog.style.setProperty("--pos-visual-viewport-height", `${posVisualViewport.height}px`);
+        dialog.style.setProperty("--pos-visual-viewport-top", `${posVisualViewport.offsetTop}px`);
     }
 
     async function readResponse(response) {
@@ -188,10 +216,13 @@
         $("#user-avatar").textContent = (profile.email || "S").slice(0, 1).toUpperCase();
         $("#user-roles").textContent = (profile.roles || []).join(" · ") || "No store role assigned";
         $("#sales-dashboard-card").classList.toggle("hidden", !hasSalesHistoryRole());
+        $("#sales-nav-link").classList.toggle("hidden", !hasSalesHistoryRole());
+        $("#reports-nav-link").classList.toggle("hidden", !hasProductReportsRole());
         document.querySelectorAll(".dashboard-profit-card").forEach((card) => {
             card.classList.toggle("hidden", !hasAdminRole());
         });
         $("#pos-customer-field").classList.toggle("hidden", !hasSalesHistoryRole());
+        setDefaultProductReportDates();
         appView.classList.remove("hidden");
         loginView.classList.add("hidden");
         await navigate("dashboard");
@@ -199,13 +230,18 @@
 
     async function navigate(page) {
         state.page = page;
+        if (page !== "pos") {
+            const dialog = $("#pos-catalog-dialog");
+            if (dialog.open) dialog.close();
+        }
         document.querySelectorAll(".nav-link").forEach((button) => {
             button.classList.toggle("active", button.dataset.page === page);
         });
         document.querySelectorAll(".page-section").forEach((section) => section.classList.add("hidden"));
         $(`#${page}-page`).classList.remove("hidden");
         $("#page-title").textContent = page === "pos" ? "Point of sale"
-            : page === "inventory" ? "Inventory" : page === "sales" ? "Sales" : "Dashboard";
+            : page === "inventory" ? "Inventory" : page === "sales" ? "Sales"
+                : page === "reports" ? "Product reports" : "Dashboard";
         appMessage.classList.add("hidden");
         try {
             if (page === "dashboard") await loadDashboard();
@@ -220,7 +256,14 @@
                 await Promise.all(requests);
             }
             if (page === "inventory") await loadInventory();
-            if (page === "sales") await loadSalesPage();
+            if (page === "sales") {
+                setDefaultSalesFilter();
+                await loadSalesPage();
+            }
+            if (page === "reports") {
+                if (!hasProductReportsRole()) throw new Error("Only admins and inventory managers can view product reports.");
+                await loadProductReport();
+            }
         } catch (error) {
             showError(error.message);
         }
@@ -371,6 +414,108 @@
         field.classList.toggle("hidden", type === "all");
     }
 
+    function setDefaultSalesFilter() {
+        const today = new Date();
+        const year = today.getFullYear();
+        const month = String(today.getMonth() + 1).padStart(2, "0");
+        const day = String(today.getDate()).padStart(2, "0");
+        $("#sales-filter-type").value = "date";
+        updateSalesFilterInput();
+        $("#sales-filter-value").value = `${year}-${month}-${day}`;
+        state.salesOffset = 0;
+    }
+
+    function setDefaultProductReportDates() {
+        const today = new Date();
+        const formatDate = (date) => {
+            const year = date.getFullYear();
+            const month = String(date.getMonth() + 1).padStart(2, "0");
+            const day = String(date.getDate()).padStart(2, "0");
+            return `${year}-${month}-${day}`;
+        };
+        $("#product-report-from").value = formatDate(new Date(today.getFullYear(), today.getMonth(), 1));
+        $("#product-report-to").value = formatDate(today);
+    }
+
+    function getProductReportRange() {
+        const fromValue = $("#product-report-from").value;
+        const toValue = $("#product-report-to").value;
+        if (!fromValue || !toValue) throw new Error("Choose both a start and end date.");
+
+        const from = new Date(`${fromValue}T00:00:00`);
+        const to = new Date(`${toValue}T00:00:00`);
+        if (Number.isNaN(from.getTime()) || Number.isNaN(to.getTime()) || from > to) {
+            throw new Error("Choose a valid date range.");
+        }
+        to.setDate(to.getDate() + 1);
+        return { from: from.toISOString(), to: to.toISOString() };
+    }
+
+    async function loadProductReport() {
+        const range = getProductReportRange();
+        const parameters = new URLSearchParams({
+            ...range,
+            limit: String(state.productReportPageSize),
+            offset: String(state.productReportOffset)
+        });
+        const report = await api(`/api/reports/products?${parameters.toString()}`);
+        renderProductReport(report);
+    }
+
+    function renderProductReport(report) {
+        const summary = report.summary || {};
+        const products = report.products || [];
+        $("#report-product-count").textContent = Number(summary.product_count || 0).toLocaleString();
+        $("#report-units-sold").textContent = Number(summary.units_sold || 0).toLocaleString();
+        $("#report-revenue").textContent = currency.format(Number(summary.revenue || 0));
+        $("#report-gross-profit").textContent = currency.format(Number(summary.gross_profit || 0));
+        $("#report-inventory-value").textContent = currency.format(Number(summary.inventory_value || 0));
+        const stockAlerts = Number(summary.low_stock_count || 0) + Number(summary.out_of_stock_count || 0);
+        $("#report-stock-alerts").textContent = stockAlerts.toLocaleString();
+        $("#report-stock-alerts-detail").textContent =
+            `${Number(summary.low_stock_count || 0)} low · ${Number(summary.out_of_stock_count || 0)} out of stock`;
+
+        const body = $("#product-report-table");
+        body.replaceChildren();
+        for (const product of products) {
+            const row = document.createElement("tr");
+            appendCell(row, product.productName);
+            appendCell(row, product.sku);
+            appendCell(row, product.categoryName);
+            appendCell(row, Number(product.stockQty).toLocaleString());
+            appendCell(row, Number(product.unitsSold).toLocaleString());
+            appendCell(row, currency.format(Number(product.revenue)));
+            appendCell(row, currency.format(Number(product.grossProfit)));
+            const statusCell = document.createElement("td");
+            const badge = document.createElement("span");
+            const isInactive = product.status === "INACTIVE";
+            const isOutOfStock = product.stockStatus === "OUT_OF_STOCK";
+            badge.className = `badge ${isInactive ? "" : isOutOfStock ? "out" : product.stockStatus === "LOW_STOCK" ? "low" : ""}`;
+            badge.textContent = isInactive ? "Inactive"
+                : isOutOfStock ? "Out of stock"
+                    : product.stockStatus === "LOW_STOCK" ? "Low stock" : "In stock";
+            statusCell.append(badge);
+            row.append(statusCell);
+            body.append(row);
+        }
+        $("#product-report-empty").classList.toggle("hidden", products.length > 0);
+        const firstProduct = report.totalCount === 0 ? 0 : state.productReportOffset + 1;
+        const lastProduct = state.productReportOffset + products.length;
+        $("#product-report-page-status").textContent =
+            `Showing ${firstProduct}–${lastProduct} of ${Number(report.totalCount).toLocaleString()} products`;
+        $("#product-report-previous").disabled = state.productReportOffset === 0;
+        $("#product-report-next").disabled = state.productReportOffset + products.length >= report.totalCount;
+    }
+
+    async function refreshProductReport(resetOffset = false) {
+        if (resetOffset) state.productReportOffset = 0;
+        try {
+            await loadProductReport();
+        } catch (error) {
+            showError(error.message);
+        }
+    }
+
     async function loadPosCustomers() {
         const customers = await api("/api/customers");
         const select = $("#pos-customer");
@@ -421,6 +566,31 @@
         state.posSearchTimer = window.setTimeout(() => searchForPos(false, requestId, false), 120);
     }
 
+    function openPosCatalog(focusSearch = false) {
+        const dialog = $("#pos-catalog-dialog");
+        if (!dialog.open) dialog.showModal();
+        $("#pos-search-toggle").setAttribute("aria-expanded", "true");
+        $("#pos-search-toggle-label").textContent = "Close search";
+        if (focusSearch) $("#product-query").focus();
+    }
+
+    async function searchQuickPos() {
+        const query = $("#pos-quick-search").value.trim();
+        $("#product-query").value = query;
+        window.clearTimeout(state.posSearchTimer);
+        if (!query) {
+            schedulePosSearch();
+            openPosCatalog(true);
+            return;
+        }
+        if (await searchForPos(true)) {
+            $("#product-query").value = "";
+            schedulePosSearch();
+            return;
+        }
+        openPosCatalog();
+    }
+
     async function searchForPos(
             autoAddBarcode = false,
             requestId = ++state.posSearchRequest,
@@ -428,7 +598,7 @@
         const query = $("#product-query").value.trim();
         if (!query) {
             $("#product-query").focus();
-            return;
+            return false;
         }
         try {
             const encoded = encodeURIComponent(query);
@@ -436,24 +606,26 @@
             if (exactBarcodeLookup) {
                 try {
                     const byBarcode = await api(`/api/products/barcode/${encoded}`);
-                    if (requestId !== state.posSearchRequest) return;
+                    if (requestId !== state.posSearchRequest) return false;
                     results = [byBarcode];
                 } catch (error) {
-                    if (requestId !== state.posSearchRequest) return;
+                    if (requestId !== state.posSearchRequest) return false;
                     if (error.status !== 404) throw error;
                     results = await api(`/api/products?q=${encoded}&limit=30`);
                 }
             } else {
                 results = await api(`/api/products?q=${encoded}&limit=30`);
             }
-            if (requestId !== state.posSearchRequest) return;
+            if (requestId !== state.posSearchRequest) return false;
             state.products = results.filter((product) => product.status === "ACTIVE");
             renderSearchResults();
             if (autoAddBarcode && state.products.length === 1 && state.products[0].barcode === query) {
-                addToCart(state.products[0]);
+                return addToCart(state.products[0]);
             }
+            return false;
         } catch (error) {
             if (requestId === state.posSearchRequest) showError(error.message);
+            return false;
         }
     }
 
@@ -492,17 +664,21 @@
     function addToCart(product) {
         if (product.status !== "ACTIVE") {
             showError("This product is inactive.");
-            return;
+            return false;
         }
         const line = state.cart.get(product.id);
         const quantity = (line?.quantity || 0) + 1;
         if (quantity > product.stockQty) {
             showError(`Not enough stock for ${product.name}.`);
-            return;
+            return false;
         }
         state.cart.set(product.id, { product, quantity });
         renderCart();
         appMessage.classList.add("hidden");
+        $("#pos-quick-search").value = "";
+        const catalogDialog = $("#pos-catalog-dialog");
+        if (catalogDialog.open) catalogDialog.close();
+        return true;
     }
 
     function updateQuantity(productId, delta) {
@@ -556,6 +732,22 @@
         $("#cart-count").textContent = `${itemCount} ${itemCount === 1 ? "item" : "items"}`;
         $("#cart-total").textContent = currency.format(total);
         $("#checkout").disabled = itemCount === 0;
+        updateChangeDue();
+    }
+
+    function updateChangeDue() {
+        const row = $("#change-due-row");
+        const cashValue = $("#cash-tendered").value;
+        const tenderedCents = Math.round(Number(cashValue) * 100);
+        const totalCents = [...state.cart.values()].reduce((sum, line) => {
+            return sum + Math.round(Number(line.product.sellingPrice) * 100) * line.quantity;
+        }, 0);
+        if (!cashValue || state.cart.size === 0 || !Number.isSafeInteger(tenderedCents)) {
+            row.classList.add("hidden");
+            return;
+        }
+        $("#change-due-value").textContent = currency.format((tenderedCents - totalCents) / 100);
+        row.classList.remove("hidden");
     }
 
     function quantityButton(label, action) {
@@ -600,6 +792,7 @@
             state.cart.clear();
             renderCart();
             $("#cash-tendered").value = "";
+            updateChangeDue();
             $("#pos-customer").value = "";
             $("#receipt-dialog").showModal();
             showNotice(`Sale ${receipt.receiptNumber} completed.`);
@@ -690,13 +883,28 @@
                 status.append(badge);
                 row.append(status);
                 const actions = document.createElement("td");
+                const actionGroup = document.createElement("div");
+                actionGroup.className = "inventory-actions";
                 const adjust = document.createElement("button");
                 adjust.className = "button secondary";
                 adjust.type = "button";
-                adjust.textContent = "Adjust";
+                adjust.textContent = "Stock";
                 adjust.disabled = !hasInventoryRole();
                 adjust.addEventListener("click", () => adjustStock(product));
-                actions.append(adjust);
+                const price = document.createElement("button");
+                price.className = "button secondary";
+                price.type = "button";
+                price.textContent = "Price";
+                price.disabled = !hasInventoryRole();
+                price.addEventListener("click", () => adjustSellingPrice(product));
+                const history = document.createElement("button");
+                history.className = "button ghost";
+                history.type = "button";
+                history.textContent = "History";
+                history.disabled = !hasInventoryRole();
+                history.addEventListener("click", () => showProductHistory(product));
+                actionGroup.append(adjust, price, history);
+                actions.append(actionGroup);
                 row.append(actions);
                 body.append(row);
             }
@@ -717,6 +925,159 @@
         updateAdjustmentPreview();
         $("#adjust-stock-dialog").showModal();
         $("#adjust-stock-quantity").focus();
+    }
+
+    function adjustSellingPrice(product) {
+        state.pricingProduct = product;
+        $("#adjust-price-product-name").textContent = product.name;
+        $("#adjust-price-product-sku").textContent = product.sku;
+        $("#adjust-price-current").textContent = currency.format(Number(product.sellingPrice));
+        $("#adjust-price-form").reset();
+        $("#adjust-price-value").value = Number(product.sellingPrice).toFixed(2);
+        $("#adjust-price-error").textContent = "";
+        $("#adjust-price-error").classList.add("hidden");
+        $("#adjust-price-dialog").showModal();
+        $("#adjust-price-value").focus();
+    }
+
+    async function submitPriceAdjustment(event) {
+        event.preventDefault();
+        const product = state.pricingProduct;
+        const errorElement = $("#adjust-price-error");
+        if (!product) {
+            errorElement.textContent = "Select a product before changing its price.";
+            errorElement.classList.remove("hidden");
+            return;
+        }
+        const sellingPrice = Number($("#adjust-price-value").value);
+        const reason = $("#adjust-price-reason").value.trim();
+        if (!Number.isFinite(sellingPrice) || sellingPrice < 0 || !reason) {
+            errorElement.textContent = "Enter a valid selling price and a reason for the change.";
+            errorElement.classList.remove("hidden");
+            return;
+        }
+        const button = $("#save-price-adjustment");
+        button.disabled = true;
+        button.textContent = "Saving...";
+        try {
+            await api(`/api/products/${product.id}/selling-price`, {
+                method: "PATCH",
+                body: JSON.stringify({ sellingPrice, reason })
+            });
+            $("#adjust-price-dialog").close();
+            showNotice("Selling price updated.");
+            await searchInventory();
+        } catch (error) {
+            errorElement.textContent = error.message || "Could not update the selling price.";
+            errorElement.classList.remove("hidden");
+        } finally {
+            button.disabled = false;
+            button.textContent = "Save price";
+        }
+    }
+
+    async function showProductHistory(product) {
+        state.historyProduct = product;
+        state.historyOffset = 0;
+        state.historyRequest += 1;
+        $("#product-history-subtitle").textContent = `${product.name} · ${product.sku}`;
+        $("#product-history-list").replaceChildren();
+        $("#product-history-error").textContent = "";
+        $("#product-history-error").classList.add("hidden");
+        $("#product-history-empty").textContent = "Loading product history…";
+        $("#product-history-empty").classList.remove("hidden");
+        $("#product-history-more").classList.add("hidden");
+        $("#product-history-dialog").showModal();
+        await loadProductHistory();
+    }
+
+    async function loadProductHistory() {
+        const product = state.historyProduct;
+        if (!product) return;
+        const requestId = state.historyRequest;
+        const offset = state.historyOffset;
+        const moreButton = $("#product-history-more");
+        moreButton.disabled = true;
+        moreButton.textContent = "Loading...";
+        try {
+            const entries = await api(
+                `/api/products/${product.id}/history?limit=${state.historyPageSize}&offset=${offset}`);
+            if (requestId !== state.historyRequest || state.historyProduct?.id !== product.id) return;
+            if (offset === 0 && entries.length === 0) {
+                $("#product-history-empty").textContent = "No product activity recorded.";
+                $("#product-history-empty").classList.remove("hidden");
+            } else {
+                $("#product-history-empty").classList.add("hidden");
+                entries.forEach((entry) => $("#product-history-list").append(renderProductHistoryEvent(entry)));
+            }
+            state.historyOffset += entries.length;
+            moreButton.classList.toggle("hidden", entries.length < state.historyPageSize);
+        } catch (error) {
+            if (requestId !== state.historyRequest) return;
+            $("#product-history-empty").classList.add("hidden");
+            $("#product-history-error").textContent = error.message || "Could not load product history.";
+            $("#product-history-error").classList.remove("hidden");
+        } finally {
+            if (requestId === state.historyRequest) {
+                moreButton.disabled = false;
+                moreButton.textContent = "Load older activity";
+            }
+        }
+    }
+
+    function renderProductHistoryEvent(entry) {
+        const event = document.createElement("article");
+        event.className = "history-event";
+        const heading = document.createElement("div");
+        heading.className = "history-event-heading";
+        const title = document.createElement("strong");
+        const labels = {
+            PRODUCT_CREATED: "Product added",
+            PRICE_CHANGED: "Selling price changed",
+            STOCK_ADJUSTMENT: "Stock adjusted",
+            STOCK_SALE: "Stock sold",
+            STOCK_PURCHASE: "Stock received",
+            STOCK_RETURN: "Stock returned"
+        };
+        title.textContent = labels[entry.eventType] || entry.eventType;
+        const meta = document.createElement("span");
+        meta.className = "history-event-meta";
+        meta.textContent = `${formatHistoryDate(entry.createdAt)} · ${entry.changedBy}`;
+        heading.append(title, meta);
+        event.append(heading);
+
+        const detail = document.createElement("p");
+        detail.className = "history-event-detail";
+        if (entry.eventType === "PRICE_CHANGED") {
+            detail.textContent = `${currency.format(Number(entry.oldSellingPrice))} → ${currency.format(Number(entry.newSellingPrice))}`;
+        } else if (entry.eventType === "PRODUCT_CREATED") {
+            const initialDetails = [];
+            if (entry.newSellingPrice !== null) {
+                initialDetails.push(`Starting selling price: ${currency.format(Number(entry.newSellingPrice))}`);
+            }
+            if (entry.quantityAfter !== null) {
+                initialDetails.push(`Starting stock: ${Number(entry.quantityAfter).toLocaleString()}`);
+            }
+            detail.textContent = initialDetails.join(" · ") || "Product record created.";
+        } else if (entry.quantityChange !== null) {
+            const change = Number(entry.quantityChange);
+            detail.textContent = `${change > 0 ? "+" : ""}${change.toLocaleString()} units · ${Number(entry.quantityAfter).toLocaleString()} in stock`;
+        }
+        if (detail.textContent) event.append(detail);
+        if (entry.reason) {
+            const reason = document.createElement("small");
+            reason.className = "history-event-reason";
+            reason.textContent = `Reason: ${entry.reason}`;
+            event.append(reason);
+        }
+        return event;
+    }
+
+    function formatHistoryDate(value) {
+        const date = new Date(value);
+        return Number.isNaN(date.getTime())
+            ? String(value || "Unknown date")
+            : new Intl.DateTimeFormat("en-PH", { dateStyle: "medium", timeStyle: "short" }).format(date);
     }
 
     function updateAdjustmentPreview() {
@@ -828,13 +1189,40 @@
         return (state.user?.roles || []).includes("ADMIN");
     }
 
+    function hasProductReportsRole() {
+        const roles = state.user?.roles || [];
+        return roles.includes("ADMIN") || roles.includes("INVENTORY_MANAGER");
+    }
+
     function canCreateProduct() {
         const roles = state.user?.roles || [];
         return roles.includes("ADMIN") || roles.includes("INVENTORY_MANAGER");
     }
 
     function setupEvents() {
+        syncPosCatalogLayout();
+        posCatalogMedia.addEventListener("change", syncPosCatalogLayout);
+        if (posVisualViewport) {
+            posVisualViewport.addEventListener("resize", updatePosCatalogViewport);
+            posVisualViewport.addEventListener("scroll", updatePosCatalogViewport);
+        }
+        $("#pos-catalog-dialog").addEventListener("close", () => {
+            $("#pos-search-toggle").setAttribute("aria-expanded", "false");
+            $("#pos-search-toggle-label").textContent = "Search";
+        });
+        $("#pos-catalog-dialog").addEventListener("click", (event) => {
+            if (event.target === $("#pos-catalog-dialog")) $("#pos-catalog-dialog").close();
+        });
         $("#login-form").addEventListener("submit", signIn);
+        const password = $("#password");
+        const passwordVisibilityToggle = $("#toggle-password-visibility");
+        passwordVisibilityToggle.addEventListener("click", () => {
+            const isVisible = password.type === "password";
+            password.type = isVisible ? "text" : "password";
+            passwordVisibilityToggle.textContent = isVisible ? "Hide" : "Show";
+            passwordVisibilityToggle.setAttribute("aria-label", `${isVisible ? "Hide" : "Show"} password`);
+            passwordVisibilityToggle.setAttribute("aria-pressed", String(isVisible));
+        });
         $("#sign-out").addEventListener("click", () => showLogin());
         $("#refresh-dashboard").addEventListener("click", () => navigate("dashboard"));
         $("#sales-dashboard-card").addEventListener("click", () => navigate("sales"));
@@ -859,7 +1247,42 @@
             state.salesOffset += state.salesPageSize;
             refreshSalesPage();
         });
+        $("#apply-product-report").addEventListener("click", () => refreshProductReport(true));
+        $("#refresh-product-report").addEventListener("click", () => refreshProductReport());
+        $("#product-report-from").addEventListener("keydown", (event) => {
+            if (event.key === "Enter") refreshProductReport(true);
+        });
+        $("#product-report-to").addEventListener("keydown", (event) => {
+            if (event.key === "Enter") refreshProductReport(true);
+        });
+        $("#product-report-previous").addEventListener("click", () => {
+            state.productReportOffset = Math.max(0, state.productReportOffset - state.productReportPageSize);
+            refreshProductReport();
+        });
+        $("#product-report-next").addEventListener("click", () => {
+            state.productReportOffset += state.productReportPageSize;
+            refreshProductReport();
+        });
         $("#product-query").addEventListener("input", schedulePosSearch);
+        $("#pos-quick-search").addEventListener("input", () => {
+            $("#product-query").value = $("#pos-quick-search").value;
+            schedulePosSearch();
+        });
+        $("#pos-quick-search").addEventListener("keydown", (event) => {
+            if (event.key === "Enter") {
+                event.preventDefault();
+                searchQuickPos();
+            }
+        });
+        $("#pos-search-toggle").addEventListener("click", () => {
+            const dialog = $("#pos-catalog-dialog");
+            if (dialog.open) {
+                dialog.close();
+                return;
+            }
+            searchQuickPos();
+        });
+        $("#pos-catalog-close").addEventListener("click", () => $("#pos-catalog-dialog").close());
         $("#search-products").addEventListener("click", () => {
             window.clearTimeout(state.posSearchTimer);
             searchForPos(true);
@@ -876,6 +1299,7 @@
             renderCart();
         });
         $("#checkout").addEventListener("click", checkout);
+        $("#cash-tendered").addEventListener("input", updateChangeDue);
         $("#payment-method").addEventListener("change", (event) => {
             $("#cash-field").classList.toggle("hidden", event.target.value !== "CASH");
         });
@@ -900,6 +1324,17 @@
         $("#cancel-stock-adjustment").addEventListener("click", () => $("#adjust-stock-dialog").close());
         $("#adjust-stock-dialog").addEventListener("close", () => {
             state.adjustingProduct = null;
+        });
+        $("#adjust-price-form").addEventListener("submit", submitPriceAdjustment);
+        $("#cancel-price-adjustment").addEventListener("click", () => $("#adjust-price-dialog").close());
+        $("#adjust-price-dialog").addEventListener("close", () => {
+            state.pricingProduct = null;
+        });
+        $("#product-history-more").addEventListener("click", loadProductHistory);
+        $("#close-product-history").addEventListener("click", () => $("#product-history-dialog").close());
+        $("#product-history-dialog").addEventListener("close", () => {
+            state.historyProduct = null;
+            state.historyRequest += 1;
         });
         $("#print-receipt").addEventListener("click", () => window.print());
         $("#close-receipt").addEventListener("click", () => $("#receipt-dialog").close());

@@ -63,6 +63,16 @@ public class SalesController {
         return sales.bestSellers(limit);
     }
 
+    @GetMapping("/reports/products")
+    @PreAuthorize("hasAnyRole('ADMIN', 'INVENTORY_MANAGER')")
+    public SalesService.ProductReport productReport(
+            @RequestParam @NotNull @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) Instant from,
+            @RequestParam @NotNull @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) Instant to,
+            @RequestParam(defaultValue = "50") @Min(1) @Max(100) int limit,
+            @RequestParam(defaultValue = "0") @Min(0) int offset) {
+        return sales.productReport(from, to, limit, offset);
+    }
+
     @GetMapping("/reports/sales")
     @PreAuthorize("hasAnyRole('ADMIN', 'CASHIER')")
     public List<Map<String, Object>> salesReport(

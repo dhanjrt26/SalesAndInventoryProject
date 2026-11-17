@@ -1,11 +1,13 @@
 package com.example.salesinventory.product;
 
+import java.math.BigDecimal;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Timestamp;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 import org.springframework.http.HttpStatus;
@@ -85,12 +87,17 @@ public class ProductService {
                     VALUES (?, 'ADJUSTMENT', ?, ?, 'Initial stock', ?)
                     """, id, stock, stock, actorId);
         }
+        jdbc.update("""
+                INSERT INTO audit_logs (actor_id, action, entity_type, entity_id, details)
+                VALUES (?, 'PRODUCT_CREATED', 'PRODUCT', ?,
+                        jsonb_build_object('sellingPrice', ?::numeric, 'initialStock', ?::integer))
+                """, actorId, id, request.sellingPrice(), stock);
         return get(id);
     }
 
     @Transactional
     public ProductResponse update(UUID id, ProductRequest request) {
-        get(id);
+        ProductResponse current = getForUpdate(id);
         if (request.stockQty() != null) {
             throw new ApiException(HttpStatus.BAD_REQUEST,
                     "Use the inventory adjustment endpoint to change stock.");
@@ -109,7 +116,75 @@ public class ProductService {
         if (changed != 1) {
             throw new ApiException(HttpStatus.NOT_FOUND, "Product not found.");
         }
+        if (current.sellingPrice().compareTo(request.sellingPrice()) != 0) {
+            recordSellingPriceChange(id, current.sellingPrice(), request.sellingPrice(),
+                    "Product details updated");
+        }
         return get(id);
+    }
+
+    @Transactional
+    public ProductResponse adjustSellingPrice(UUID id, BigDecimal sellingPrice, String reason) {
+        if (sellingPrice == null || sellingPrice.signum() < 0) {
+            throw new ApiException(HttpStatus.BAD_REQUEST, "Selling price must be zero or greater.");
+        }
+        if (reason == null || reason.isBlank() || reason.length() > 500) {
+            throw new ApiException(HttpStatus.BAD_REQUEST, "A reason of up to 500 characters is required.");
+        }
+        ProductResponse current = getForUpdate(id);
+        if (current.sellingPrice().compareTo(sellingPrice) == 0) {
+            throw new ApiException(HttpStatus.BAD_REQUEST, "The new selling price matches the current price.");
+        }
+        jdbc.update("""
+                UPDATE products SET selling_price = ?, updated_at = now()
+                WHERE id = ?
+                """, sellingPrice, id);
+        recordSellingPriceChange(id, current.sellingPrice(), sellingPrice, reason.trim());
+        return get(id);
+    }
+
+    public List<Map<String, Object>> history(UUID productId, int limit, int offset) {
+        get(productId);
+        return jdbc.queryForList("""
+                SELECT h.id, h.event_type AS "eventType", h.created_at AS "createdAt",
+                       COALESCE(u.display_name, 'Unknown user') AS "changedBy",
+                       h.reason, h.old_selling_price AS "oldSellingPrice",
+                       h.new_selling_price AS "newSellingPrice",
+                       h.quantity_change AS "quantityChange", h.quantity_after AS "quantityAfter"
+                FROM (
+                    SELECT id, 'PRODUCT_CREATED'::text AS event_type, actor_id, created_at,
+                           CASE WHEN details->>'legacy' = 'true' THEN details->>'note' END AS reason,
+                           NULL::numeric AS old_selling_price,
+                           NULLIF(details->>'sellingPrice', '')::numeric AS new_selling_price,
+                           NULL::integer AS quantity_change,
+                           NULLIF(details->>'initialStock', '')::integer AS quantity_after
+                    FROM audit_logs
+                    WHERE entity_type = 'PRODUCT' AND entity_id = ? AND action = 'PRODUCT_CREATED'
+                    UNION ALL
+                    SELECT id, 'PRICE_CHANGED'::text, actor_id, created_at,
+                           details->>'reason',
+                           (details->>'oldSellingPrice')::numeric,
+                           (details->>'newSellingPrice')::numeric,
+                           NULL::integer, NULL::integer
+                    FROM audit_logs
+                    WHERE entity_type = 'PRODUCT' AND entity_id = ? AND action = 'PRODUCT_PRICE_CHANGED'
+                    UNION ALL
+                    SELECT id,
+                           CASE transaction_type
+                               WHEN 'ADJUSTMENT' THEN 'STOCK_ADJUSTMENT'
+                               WHEN 'SALE' THEN 'STOCK_SALE'
+                               WHEN 'PURCHASE' THEN 'STOCK_PURCHASE'
+                               WHEN 'RETURN' THEN 'STOCK_RETURN'
+                           END::text,
+                           performed_by, created_at, reason,
+                           NULL::numeric, NULL::numeric, quantity_change, quantity_after
+                    FROM inventory_transactions
+                    WHERE product_id = ?
+                ) h
+                LEFT JOIN app_users u ON u.auth_user_id = h.actor_id
+                ORDER BY h.created_at DESC, h.id DESC
+                LIMIT ? OFFSET ?
+                """, productId, productId, productId, limit, offset);
     }
 
     @Transactional
@@ -143,6 +218,23 @@ public class ProductService {
                 rs.getString("status"),
                 toInstant(created),
                 toInstant(updated));
+    }
+
+    private void recordSellingPriceChange(
+            UUID productId, BigDecimal oldPrice, BigDecimal newPrice, String reason) {
+        jdbc.update("""
+                INSERT INTO audit_logs (actor_id, action, entity_type, entity_id, details)
+                VALUES (?, 'PRODUCT_PRICE_CHANGED', 'PRODUCT', ?,
+                        jsonb_build_object('oldSellingPrice', ?::numeric,
+                                           'newSellingPrice', ?::numeric, 'reason', ?))
+                """, actorContext.userId(), productId, oldPrice, newPrice, reason);
+    }
+
+    private ProductResponse getForUpdate(UUID id) {
+        return jdbc.query("""
+                SELECT * FROM products WHERE id = ? FOR UPDATE
+                """, PRODUCT_MAPPER, id).stream().findFirst()
+                .orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, "Product not found."));
     }
 
     private static Instant toInstant(Timestamp timestamp) {

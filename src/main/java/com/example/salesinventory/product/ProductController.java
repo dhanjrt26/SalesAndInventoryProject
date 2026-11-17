@@ -1,16 +1,22 @@
 package com.example.salesinventory.product;
 
+import java.math.BigDecimal;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 import jakarta.validation.Valid;
+import jakarta.validation.constraints.DecimalMin;
+import jakarta.validation.constraints.Digits;
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Size;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
@@ -47,6 +53,23 @@ public class ProductController {
         return products.getByBarcode(barcode);
     }
 
+    @GetMapping("/{id}/history")
+    @PreAuthorize("hasAnyRole('ADMIN', 'INVENTORY_MANAGER')")
+    public List<Map<String, Object>> history(
+            @PathVariable UUID id,
+            @RequestParam(defaultValue = "50") @Min(1) @Max(100) int limit,
+            @RequestParam(defaultValue = "0") @Min(0) int offset) {
+        return products.history(id, limit, offset);
+    }
+
+    @PatchMapping("/{id}/selling-price")
+    @PreAuthorize("hasAnyRole('ADMIN', 'INVENTORY_MANAGER')")
+    public ProductResponse adjustSellingPrice(
+            @PathVariable UUID id,
+            @Valid @RequestBody SellingPriceRequest request) {
+        return products.adjustSellingPrice(id, request.sellingPrice(), request.reason());
+    }
+
     @PostMapping
     @PreAuthorize("hasAnyRole('ADMIN', 'INVENTORY_MANAGER')")
     public ProductResponse create(@Valid @RequestBody ProductRequest request) {
@@ -66,5 +89,10 @@ public class ProductController {
     }
 
     public record BarcodeRequest(@NotBlank @Size(max = 64) String barcode) {
+    }
+
+    public record SellingPriceRequest(
+            @NotNull @DecimalMin("0.00") @Digits(integer = 10, fraction = 2) BigDecimal sellingPrice,
+            @NotBlank @Size(max = 500) String reason) {
     }
 }

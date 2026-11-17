@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="theme-color" content="#f5f7f3">
     <title>Sari-Sari Store | Sales & Inventory</title>
-    <link rel="stylesheet" href="/app.css?v=global-progress-20261112">
+    <link rel="stylesheet" href="/app.css?v=login-password-visibility-20261117">
 </head>
 <body>
 <div id="global-progress" class="global-progress" role="progressbar" aria-label="Loading data"
@@ -21,7 +21,11 @@
                 <input id="username" type="text" autocomplete="username" required>
             </label>
             <label>Password
-                <input id="password" type="password" autocomplete="current-password" required>
+                <div class="password-field">
+                    <input id="password" type="password" autocomplete="current-password" required>
+                    <button id="toggle-password-visibility" class="password-visibility-toggle" type="button"
+                            aria-label="Show password" aria-pressed="false">Show</button>
+                </div>
             </label>
             <button class="button primary wide" type="submit">Sign in</button>
             <p id="login-message" class="form-message" role="status"></p>
@@ -38,6 +42,8 @@
         <nav class="navigation" aria-label="Main navigation">
             <button class="nav-link active" data-page="dashboard"><span>▦</span> Dashboard</button>
             <button class="nav-link" data-page="pos"><span>▣</span> Point of sale</button>
+            <button class="nav-link hidden" data-page="sales" id="sales-nav-link"><span>₱</span> Sales</button>
+            <button class="nav-link hidden" data-page="reports" id="reports-nav-link"><span>▥</span> Reports</button>
             <button class="nav-link" data-page="inventory"><span>▤</span> Inventory</button>
         </nav>
         <div class="sidebar-footer">
@@ -142,6 +148,104 @@
             </div>
         </section>
 
+        <section id="reports-page" class="page-section hidden">
+            <div class="page-intro">
+                <div><h1>Reports &amp; analytics</h1><p class="muted">Review product performance, inventory movements, purchasing, payments, and customers.</p></div>
+                <button id="refresh-product-report" class="button secondary" type="button">Refresh report</button>
+            </div>
+            <div class="content-card">
+                <div class="search-row report-filters">
+                    <label>From<input id="product-report-from" type="date" required></label>
+                    <label>To<input id="product-report-to" type="date" required></label>
+                    <button id="apply-product-report" class="button primary" type="button">Apply dates</button>
+                </div>
+                <div class="stats-grid product-report-summary">
+                    <article class="stat-card"><span>Active products</span><strong id="report-product-count">0</strong><small>Current catalog</small></article>
+                    <article class="stat-card"><span>Units sold</span><strong id="report-units-sold">0</strong><small>Selected period</small></article>
+                    <article class="stat-card"><span>Sales revenue</span><strong id="report-revenue">₱0.00</strong><small>Selected period</small></article>
+                    <article class="stat-card profit-stat"><span>Gross profit</span><strong id="report-gross-profit">₱0.00</strong><small>Selected period</small></article>
+                    <article class="stat-card"><span>Stock value</span><strong id="report-inventory-value">₱0.00</strong><small>Current stock at cost</small></article>
+                    <article class="stat-card"><span>Stock alerts</span><strong id="report-stock-alerts">0</strong><small id="report-stock-alerts-detail">Low or out of stock</small></article>
+                    <article class="stat-card"><span>Completed sales</span><strong id="report-completed-sales">0</strong><small>Selected period</small></article>
+                    <article class="stat-card"><span>Walk-in sales</span><strong id="report-walk-in-sales">0</strong><small id="report-walk-in-revenue">₱0.00 sales total</small></article>
+                </div>
+                <div class="section-heading">
+                    <div><h3>Product performance</h3><p class="muted">Products ranked by revenue for the selected period.</p></div>
+                </div>
+                <div class="table-wrap">
+                    <table>
+                        <thead><tr><th>Product</th><th>SKU</th><th>Category</th><th>Stock</th><th>Units sold</th><th>Revenue</th><th>Gross profit</th><th>Stock status</th></tr></thead>
+                        <tbody id="product-report-table"></tbody>
+                    </table>
+                    <p id="product-report-empty" class="empty-state hidden">No products found.</p>
+                </div>
+                <div class="sales-pagination">
+                    <p id="product-report-page-status" class="muted">No products</p>
+                    <div class="button-row">
+                        <button id="product-report-previous" class="button secondary" type="button">Previous</button>
+                        <button id="product-report-next" class="button secondary" type="button">Next</button>
+                    </div>
+                </div>
+            </div>
+            <div class="report-grid">
+                <section class="content-card">
+                    <div class="section-heading"><div><h3>Category performance</h3><p class="muted">Sales and stock by active product category.</p></div></div>
+                    <div class="table-wrap">
+                        <table><thead><tr><th>Category</th><th>Products</th><th>Stock</th><th>Units sold</th><th>Revenue</th><th>Gross profit</th></tr></thead>
+                            <tbody id="category-report-table"></tbody></table>
+                        <p id="category-report-empty" class="empty-state hidden">No category data for this period.</p>
+                    </div>
+                </section>
+                <section class="content-card">
+                    <div class="section-heading"><div><h3>Brand performance</h3><p class="muted">Sales and stock by active product brand.</p></div></div>
+                    <div class="table-wrap">
+                        <table><thead><tr><th>Brand</th><th>Products</th><th>Stock</th><th>Units sold</th><th>Revenue</th><th>Gross profit</th></tr></thead>
+                            <tbody id="brand-report-table"></tbody></table>
+                        <p id="brand-report-empty" class="empty-state hidden">No brand data for this period.</p>
+                    </div>
+                </section>
+                <section class="content-card">
+                    <div class="section-heading"><div><h3>Inventory movements</h3><p class="muted">Stock additions and removals from inventory transactions.</p></div></div>
+                    <div class="table-wrap">
+                        <table><thead><tr><th>Type</th><th>Transactions</th><th>Units added</th><th>Units removed</th><th>Net change</th></tr></thead>
+                            <tbody id="movement-report-table"></tbody></table>
+                        <p id="movement-report-empty" class="empty-state hidden">No inventory movements for this period.</p>
+                    </div>
+                </section>
+                <section class="content-card">
+                    <div class="section-heading"><div><h3>Purchasing &amp; suppliers</h3><p class="muted">Purchase order value and received stock by supplier.</p></div></div>
+                    <div class="mini-stats">
+                        <div><span>Orders</span><strong id="report-order-count">0</strong></div>
+                        <div><span>Open orders</span><strong id="report-open-order-count">0</strong></div>
+                        <div><span>Ordered value</span><strong id="report-ordered-value">₱0.00</strong></div>
+                        <div><span>Received value</span><strong id="report-received-value">₱0.00</strong></div>
+                        <div><span>Units received</span><strong id="report-units-received">0</strong></div>
+                    </div>
+                    <div class="table-wrap">
+                        <table><thead><tr><th>Supplier</th><th>Orders</th><th>Ordered value</th><th>Units received</th><th>Received value</th><th>Status</th></tr></thead>
+                            <tbody id="supplier-report-table"></tbody></table>
+                        <p id="supplier-report-empty" class="empty-state hidden">No supplier data for this period.</p>
+                    </div>
+                </section>
+                <section class="content-card">
+                    <div class="section-heading"><div><h3>Payments</h3><p class="muted">Completed sale payments grouped by method.</p></div></div>
+                    <div class="table-wrap">
+                        <table><thead><tr><th>Method</th><th>Payments</th><th>Sales</th><th>Amount</th></tr></thead>
+                            <tbody id="payment-report-table"></tbody></table>
+                        <p id="payment-report-empty" class="empty-state hidden">No payment data for this period.</p>
+                    </div>
+                </section>
+                <section class="content-card">
+                    <div class="section-heading"><div><h3>Customer performance</h3><p class="muted">Completed sales for customers with an associated account.</p></div></div>
+                    <div class="table-wrap">
+                        <table><thead><tr><th>Customer</th><th>Sales</th><th>Units purchased</th><th>Sales total</th></tr></thead>
+                            <tbody id="customer-report-table"></tbody></table>
+                        <p id="customer-report-empty" class="empty-state hidden">No customer sales for this period.</p>
+                    </div>
+                </section>
+            </div>
+        </section>
+
         <section id="pos-page" class="page-section hidden">
             <div class="page-intro pos-page-intro">
                 <div>
@@ -149,7 +253,23 @@
                     <h1>Point of sale</h1>
                     <p class="muted">Scan a barcode or search for products to start a sale.</p>
                 </div>
-                <div class="pos-ready"><span class="online-dot"></span>Ready to sell</div>
+                <div class="pos-mobile-search">
+                    <label class="pos-mobile-search-field">Barcode or product search
+                        <input id="pos-quick-search" type="search" autocomplete="off" autocapitalize="off"
+                               spellcheck="false" placeholder="Scan barcode or enter a product">
+                    </label>
+                    <button id="pos-search-toggle" class="button secondary pos-search-toggle" type="button"
+                            aria-controls="pos-catalog-panel" aria-expanded="false">
+                        <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                            <circle cx="10.8" cy="10.8" r="6.3"></circle>
+                            <path d="m15.4 15.4 4.2 4.2"></path>
+                        </svg>
+                        <span id="pos-search-toggle-label">Search</span>
+                    </button>
+                </div>
+                <div class="pos-actions">
+                    <div class="pos-ready"><span class="online-dot"></span>Ready to sell</div>
+                </div>
             </div>
             <div class="pos-layout">
                 <section class="content-card cart-card pos-cart-panel">
@@ -174,15 +294,25 @@
                             <select id="payment-method"><option value="CASH">Cash</option><option value="CARD">Card</option><option value="EWALLET">E-wallet</option></select>
                         </label>
                     </div>
-                    <label id="cash-field">Cash received
-                        <input id="cash-tendered" type="number" min="0" step="0.01" placeholder="0.00" inputmode="decimal">
-                    </label>
+                    <div id="cash-field">
+                        <label for="cash-tendered">Cash received
+                            <input id="cash-tendered" type="number" min="0" step="0.01" placeholder="0.00" inputmode="decimal">
+                        </label>
+                        <div id="change-due-row" class="change-due hidden" aria-live="polite">
+                            <span>Change</span>
+                            <strong id="change-due-value">₱0.00</strong>
+                        </div>
+                    </div>
                     <button id="checkout" class="button primary wide pos-checkout-button" disabled>Complete sale</button>
                 </section>
-                <section class="content-card pos-catalog-panel">
+                <div id="pos-catalog-slot" class="pos-catalog-slot"></div>
+            </div>
+            <dialog id="pos-catalog-dialog" class="pos-catalog-dialog" aria-labelledby="pos-catalog-title">
+                <section id="pos-catalog-panel" class="content-card pos-catalog-panel">
                     <div class="pos-panel-heading">
                         <span class="pos-panel-icon" aria-hidden="true">02</span>
-                        <div><p class="eyebrow">PRODUCT CATALOG</p><h2>Find products</h2></div>
+                        <div><p class="eyebrow">PRODUCT CATALOG</p><h2 id="pos-catalog-title">Find products</h2></div>
+                        <button id="pos-catalog-close" class="button ghost pos-catalog-close" type="button" aria-label="Close product catalog">×</button>
                     </div>
                     <div class="search-row pos-search-row">
                         <label class="grow">Barcode or product search
@@ -194,7 +324,7 @@
                     <div id="product-results" class="product-results" aria-label="Product search results"></div>
                     <p id="product-results-empty" class="empty-state">Search for a product to get started.</p>
                 </section>
-            </div>
+            </dialog>
         </section>
 
         <section id="inventory-page" class="page-section hidden">
@@ -270,6 +400,52 @@
         </div>
     </form>
 </dialog>
-<script src="/app.js?v=stock-adjustment-modal-20261112" defer></script>
+<dialog id="adjust-price-dialog" class="form-dialog" aria-labelledby="adjust-price-title">
+    <form id="adjust-price-form" class="stock-adjustment-form">
+<div class="section-heading stock-dialog-heading">
+    <div>
+        <p class="eyebrow">INVENTORY</p>
+        <h2 id="adjust-price-title">Change selling price</h2>
+        <p class="muted">Update the customer-facing price and record why it changed.</p>
+    </div>
+</div>
+<div class="stock-product-summary">
+    <div><span>Product</span><strong id="adjust-price-product-name">—</strong></div>
+    <div><span>SKU</span><strong id="adjust-price-product-sku">—</strong></div>
+    <div><span>Current price</span><strong id="adjust-price-current">—</strong></div>
+</div>
+<label>New selling price
+    <input id="adjust-price-value" name="sellingPrice" type="number" min="0" step="0.01" required>
+</label>
+<label>Reason
+    <textarea id="adjust-price-reason" name="reason" maxlength="500" required
+              placeholder="For example, supplier cost increase"></textarea>
+</label>
+<p id="adjust-price-error" class="dialog-error hidden" role="alert"></p>
+<div class="button-row stock-dialog-actions">
+    <button id="cancel-price-adjustment" class="button secondary" type="button">Cancel</button>
+    <button id="save-price-adjustment" class="button primary" type="submit">Save price</button>
+</div>
+    </form>
+</dialog>
+<dialog id="product-history-dialog" class="form-dialog" aria-labelledby="product-history-title">
+    <section class="product-history-dialog">
+<div class="section-heading stock-dialog-heading">
+    <div>
+        <p class="eyebrow">INVENTORY AUDIT</p>
+        <h2 id="product-history-title">Product history</h2>
+        <p id="product-history-subtitle" class="muted"></p>
+    </div>
+</div>
+<div id="product-history-list" class="product-history-list" aria-live="polite"></div>
+<p id="product-history-empty" class="empty-state hidden">No product activity recorded.</p>
+<p id="product-history-error" class="dialog-error hidden" role="alert"></p>
+<button id="product-history-more" class="button secondary wide hidden" type="button">Load older activity</button>
+<div class="button-row">
+    <button id="close-product-history" class="button secondary" type="button">Close</button>
+</div>
+    </section>
+</dialog>
+<script src="/app.js?v=sales-today-default-20261117" defer></script>
 </body>
 </html>
